@@ -1,0 +1,45 @@
+name: Build & validate (macOS)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-14            # Apple Silicon runner; builds a universal (arm64 + x86_64) binary
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build plugin
+        run: cmake --build build --config Release --target BeatCanvas_AU BeatCanvas_VST3 BeatCanvas_Standalone --parallel
+
+      - name: Sync-engine unit test
+        run: |
+          cmake --build build --config Release --target ClockTest
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Ad-hoc sign (required on Apple Silicon)
+        run: |
+          codesign --force --deep -s - ~/Library/Audio/Plug-Ins/Components/BeatCanvas.component
+          codesign --force --deep -s - ~/Library/Audio/Plug-Ins/VST3/BeatCanvas.vst3
+
+      - name: Validate the Audio Unit with Apple's auval (same check Logic runs)
+        run: |
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aufx Bcnv Zvkd
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp -R ~/Library/Audio/Plug-Ins/Components/BeatCanvas.component dist/
+          cp -R ~/Library/Audio/Plug-Ins/VST3/BeatCanvas.vst3 dist/
+          cd dist && zip -qry ../BeatCanvas-macOS.zip . && cd ..
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BeatCanvas-macOS
+          path: BeatCanvas-macOS.zip
